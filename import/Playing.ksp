@@ -1,0 +1,748 @@
+
+macro Playing_on_init
+
+    // stores operation time start
+    struct _PlayingTimeOperation
+        declare fadeIn
+        declare vibrato
+        declare pitchTable
+        declare pitchBendReturned := 0
+    end struct
+
+    struct _Zone
+        declare id
+        declare length
+        declare @name
+    end struct
+
+    struct _Playing
+
+        declare sys // EVENT_ID
+        declare &_GuitarNote gn
+        declare &_PlayMode playMode
+
+        //  if # -1 than this note is a child note, connected to first taken note 
+        // (used when triggering vibrato or slide while parent note is sounding)
+        declare parent
+
+        declare active // when several notes connected, one of them is active, i.e. sounds right now
+
+        { Time operations }
+        declare startTime
+
+        declare eventVelocity
+
+        // ghost note (eg. slide out sound)
+        declare ghost := 0
+
+        declare &_Zone zone
+        declare valueForSampleSpeed // value of a control which effects engine sample speed
+
+        declare &_PlayingTimeOperation timeOp
+
+        declare groupIndex
+    end struct
+
+    declare &_Playing Playing[Globals.maxVoices]
+    Playing_resetAll()
+
+end macro
+
+macro Zone_reset(#z#)
+    #z#.id := -1
+    #z#.length := 0
+end macro
+
+function Playing_setZones()
+    declare i
+    wait(1)
+    for i := 0 to Globals.maxVoices-1
+        if (Playing[i].sys # -1 and Playing[i].zone.id = -1)
+            Zone_set(i)
+        end if
+    end for
+end function
+
+macro Zone_set(i)
+    // #z#.id := get_event_par(#eid#, $EVENT_PAR_ZONE_ID)
+    // #z#.length := get_sample_length(#z#.id)    
+    // Playing[i].zone.id := Board_getZoneCode(Playing[i].gn.string, Playing[i].gn.fret, Globals.lastGroupIndex)
+    // Playing[i].zone.length := %zone_lengths[Playing[i].zone.id]
+    Playing[i].zone.id := get_event_par(Playing[i].sys, $EVENT_PAR_ZONE_ID)
+    declare dur := Playing[i].playmode.duration
+    if (dur < 0)
+        dur := 0
+    end if
+    Playing[i].zone.length := get_sample_length(Playing[i].zone.id) - 20000 - Playing[i].playmode.offset - dur
+    if (Playing[i].zone.length < 0)
+        Playing[i].zone.length := 0
+    end if
+    // TODO: optimize by saving in an array sample lengths here (first run)
+    // debug2("z"&Playing[i].zone.id&": "&Playing[i].zone.length)
+end macro
+
+function Playing_startPitchTableCycle(i, string)
+    if ((Playing[i].gn.string = string or string = Const.stringCount+1) and Playing[i].timeOp.pitchTable = -1)
+        Playing[i].timeOp.pitchTable := Funcs.Time_getCurrentTime()
+    end if
+end function
+
+function Playing_startVibratoCycle(i)
+    if (Playing[i].sys # -1 and Playing[i].playMode.rh_Muted = 0)
+        Playing[i].timeOp.vibrato := 0
+    end if
+end function
+
+function Playing_timeOperationsStartWithChilds(i)
+    declare j
+    for j := 0 to Globals.maxVoices-1
+        if (Playing[j].sys # -1 and Playing[j].parent = i or i = j)
+            Playing_timeOperationsStart(j)
+        end if
+    end for
+end function
+
+function Playing_timeOperationsStart(i)
+    if (Playing[i].playMode.legato = 1)
+        // starting fade-in operation
+        // Playing[i].timeOp.fadeIn := 0
+        // change_vol(Playing[i].sys, VOLUME_MIN, 0)
+        fade_in(Playing[i].sys, timeOperationTotals.fadeIn * 1000)
+    end if
+
+    if (playModeGlobal.vibratoDepth > 0 and Playing[i].playMode.lh_Vibrato = 0)
+        Playing_startVibratoCycle(i)
+    end if
+
+    if (Playing[i].playMode.slideIn = 1)
+
+    end if
+
+end function
+
+function Playing_getIndex(_note, string) -> result
+    declare i := 0
+    declare break := 0
+
+    while (i < Globals.maxVoices and break = 0)
+        if (Playing[i].gn.note = _note and (Playing[i].gn.string = string or string = 0) and Playing[i].parent = -1)
+            break := 1 {found note, index will be current i. Thus before i++ we have to do i--}
+            dec(i)
+        end if
+
+        inc(i)
+    end while
+
+    result := -1
+    if (i < Globals.maxVoices)
+        result := i
+    end if
+end function
+
+function Playing_getIndexBySys(sys) -> result
+    declare i
+    result := -1
+    for i := 0 to Globals.maxVoices-1
+        if (Playing[i].sys = sys)
+            result := i
+            break(i, Globals.maxVoices)
+        end if
+    end for
+end function
+
+function Playing_push(sys, _note, string, fret, active, eventVelocity) -> result
+    declare i := 0
+
+    Array_Push(Playing, Globals.maxVoices, i, Playing[i].sys # -1)
+
+    if (i < Globals.maxVoices)
+        Playing[i].sys := sys
+        Playing[i].gn.note := _note
+        Playing[i].gn.string := string
+        Playing[i].gn.fret := fret
+
+        Playing[i].eventVelocity := eventVelocity
+
+        Playing[i].active := active
+
+        Playing[i].startTime := Funcs.Time_getCurrentTime()
+    end if
+
+    result := i
+
+end function
+
+function Playing_getDuration(i) -> result
+    result := -1
+    if (Playing[i].playmode.slideDown2 > 0) 
+        result := Const.slideDown2duration
+    end if
+end function
+
+function Playing_getOffset(i) -> result
+    result := 0
+    if (Playing[i].playmode.slideUp2 > 0) 
+        result := Const.slideUp2offset
+    end if
+end function
+
+macro createChild(#parent#, active)
+    j := Playing_createChild(#parent#, active)
+    if (j # -1)
+        Playing[j].playMode.duration := Playing_getDuration(j)
+        Playing[j].playMode.offset := Playing_getOffset(j)
+    end if        
+end macro
+
+
+function Playing_startSlideOut(i, value)
+    declare j
+    createChild(i, 1)
+    Playing_playNote(j)
+end function
+
+function Playing_startChildren(i)
+    declare j
+
+{     if (Playing[i].playMode.rh_Muted = 0 and PlayModeGlobal.vibratoNatural = 1 and Playing[i].playMode.pitchBendNatural = 0) 
+        if (PlayModeGlobal.vibratoDepth > 0)
+            createChild(i, 1)
+        else 
+            createChild(i, 0)
+        end if
+
+        Playing[j].playMode.lh_Vibrato := 1
+        Playing_playNote(j)
+    end if 
+ }
+    declare group_index
+    declare ev
+
+    // Slide
+    if (playModeGlobal.slide > 0)
+
+        ev := getEngineSlideSpeed(playModeGlobal.slide)
+        createChild(i, 1)
+        if (j # -1)
+            // declare overlap
+            // overlap := Playing_isOverlapping(Playing[i].gn.string, Playing[i].gn.note)
+            declare last_note := Strings[nextNote.string-1].lastNote.note
+            Playing[j].valueForSampleSpeed := playModeGlobal.slide
+
+            // debug_Strings2()
+            if (Strings[nextNote.string-1].overlap = 0)
+                if (Playing[j].gn.fret > 0)
+                    Playing[j].playMode.slideIn := 1
+                    Playing[j].playMode.artCode := ArtsCodes.si                    
+                    ev := getEngineSlideInSpeed(Playing[j].valueForSampleSpeed)
+                end if
+            else 
+                if (lastNote.note < Playing[i].gn.note)
+
+                    if (abs(last_note - Playing[i].gn.note) <= Const.maxSlideInterval )
+                        Playing[j].playMode.slideUp := 1
+                        Playing[j].playMode.artCode := ArtsCodes.su
+                    else 
+                        ev := getEngineSlide2Speed(Playing[j].valueForSampleSpeed)
+                        Playing[j].playMode.slideUp2 := 1
+                        Playing[j].playMode.artCode := ArtsCodes.su2
+                    end if
+                else 
+                    if (abs(last_note - Playing[i].gn.note) <= Const.maxSlideInterval)
+                        Playing[j].playMode.slideDown := 1
+                        Playing[j].playMode.artCode := ArtsCodes.sd
+                    else 
+                        Playing[j].playMode.slideDown2 := 1
+                        Playing[j].playMode.artCode := ArtsCodes.sd2
+                    end if                
+                end if
+            end if
+
+            if (Playing[j].playmode.duration # -1)
+                Playing[j].playmode.duration := getDurationForSlideDown(Playing[j].valueForSampleSpeed, Playing[j].playMode.duration)
+            end if
+            Playing_playNote(j)
+            set_engine_par($ENGINE_PAR_SPEED, ev, Playing[j].groupIndex, -1, -1)
+
+        end if
+    end if
+
+    if (Playing[i].playmode.legato = 0 and playModeGlobal.tapping = 0 and playModeGlobal.slide = 0 or Playing[i].playmode.rh_Muted = 1)
+        createChild(i, 1)
+        if (j # -1)
+            PlayMode_resetPlayMode(Playing[j].playMode)
+            Playing[j].playMode.pickNoise := 1
+            // Playing[j].playMode.duration := 50000
+            Playing_playNote(j)
+        end if
+    end if
+
+    // debug_Playing()
+
+end function
+
+function Playing_lhVibratoCheck(i)
+    if (Playing[i].playMode.lh_Vibrato # 0)
+        declare ev
+        ev := getEngineLHVibratoSpeed(playModeGlobal.vibratoDepth)
+        set_engine_par($ENGINE_PAR_SPEED, ev, Playing[i].groupIndex, -1, -1)
+    end if
+end function
+
+function Playing_PitchBendCheck(i)
+    if (Playing[i].playMode.pitchBendNatural # 0)
+        declare ev
+        ev := getEnginePBSpeed(Playing[i].eventVelocity)
+        set_engine_par($ENGINE_PAR_SPEED, ev, Playing[i].groupIndex, -1, -1)
+    end if
+end function
+
+function Playing_playNote(i)
+    Groups_prepare(i)
+    declare velocity
+    declare note
+    velocity := Playing_getMappingVelocity(i)
+    note := Playing_getMappingNote(i)
+    // debug2("i("&i&"), v("&velocity&")")
+    // debug2("playing("& i &") " & " off(" & Playing[i].playMode.offset & "), dur("&Playing[i].playMode.duration&")")
+    Playing[i].sys := play_note(note, velocity, Playing[i].playMode.offset, Playing[i].playMode.duration)
+    if (Playing[i].active # 2) 
+        change_vol(Playing[i].sys, VOLUME_MIN, 0)
+    end if
+    // Zone_set(i)
+    Playing_changeTune(i, 0, 0, TuneTypes.none)
+
+    Playing[i].groupIndex := Globals.lastGroupIndex
+end function
+
+function Playing_getMappingVelocity(i) -> result
+    if (Playing[i].playmode.slideUp # 0 or Playing[i].playmode.slideDown # 0 or Playing[i].playmode.slideDown2 # 0)
+        result := getVelocity(lastNote.string, lastNote.fret)
+    else 
+        result := getVelocity(Playing[i].gn.string, Playing[i].gn.fret)
+    end if
+end function
+
+function Playing_getMappingNote(i) -> result
+    if (Playing[i].playmode.slideUp # 0 or Playing[i].playmode.slideDown # 0 or Playing[i].playmode.slideDown2 # 0 )
+        result := lastNote.note
+    else 
+        result := Playing[i].gn.note
+    end if
+end function
+
+function Playing_getFreeSlotIndex -> result
+    declare i := 0
+    while (i < Globals.maxVoices and Playing[i].sys # -1)
+        inc(i)
+    end while
+
+    result := -1
+    if (i < Globals.maxVoices)
+        result := i
+    end if
+end function
+
+function Playing_createChild(i, active) -> result
+    declare j
+    j := Playing_getFreeSlotIndex()
+
+    if (j # -1)
+        Playing_copySlot(i,j)
+        Playing[j].startTime := Funcs.Time_getCurrentTime()
+
+        Playing[j].parent := i
+
+        Playing[j].active := active
+        if (active = 1)
+            Playing[i].active := 0
+        end if
+    else 
+        message(@MSG_MAX_VOICE_REACHED)
+    end if
+
+    result := j
+end function
+
+function Playing_copySlot(i,j)
+
+    macro copyProp(#p#)
+        Playing[j].#p# := Playing[i].#p#
+    end macro
+
+    copyProp(sys)
+    copyProp(gn.note)
+    copyProp(gn.string)
+    copyProp(gn.fret)
+
+    PlayMode_copy(Playing[j].playMode, Playing[i].playMode)
+
+    copyProp(parent)
+    copyProp(active)
+    copyProp(eventVelocity)
+
+end function
+
+function Playing_remove(_note, string)
+    declare i := 0
+    while (i < Globals.maxVoices and (Playing[i].gn.note # _note or Playing[i].gn.string # string))
+        inc(i)
+    end while
+
+    if (i < Globals.maxVoices)
+        Playing_resetItem(i)
+    end if
+
+end function
+
+function Playing_resetAll
+    for i := 0 to Globals.maxVoices-1
+        Playing_resetItem(i)            
+    end for
+end function
+
+function Playing_resetItem(i)
+    if (Playing[i].sys > 0 and Playing[i].parent = -1)
+        UI_Hit_resetByMasterSys(Playing[i].sys)        
+    end if
+    Playing[i].gn.note := -1
+    Playing[i].sys := -1
+    Zone_reset(Playing[i].zone)
+    Playing[i].gn.string := -1
+    Playing[i].gn.fret := -1
+    // Playing[i].playMode.letRing := 0
+    PlayMode_resetPlayMode(Playing[i].playMode)
+
+    Playing[i].parent := -1
+    Playing[i].active := 0
+    Playing[i].ghost := 0
+    Playing[i].eventVelocity := 0
+
+    Playing[i].startTime := -1
+    Playing[i].timeOp.fadeIn := -1
+    Playing[i].timeOp.vibrato := -1
+    Playing[i].timeOp.pitchTable := -1
+    Playing[i].timeOp.pitchBendReturned := 0
+
+    Playing[i].valueForSampleSpeed := -1
+end function
+
+function Playing_resetItemWithChilds(i)
+    declare j
+
+    // reset all children notes
+    for j := 0 to Globals.maxVoices-1
+        if (Playing[j].parent = i)
+            Playing_resetItem(j)
+        end if
+    end for
+
+    Playing_resetItem(i)
+end function
+
+function Playing_vibratoTrigger(new_value)
+
+        declare i // note to be morphed to vibrato
+        declare j // child note to be created and morphed to
+        for i := 0 to Globals.maxVoices-1
+            if (Playing[i].sys # -1 and Playing[i].parent = -1 and Playing[i].playmode.rh_Muted = 0)
+                for j := 0 to Globals.maxVoices-1
+                    if (Playing[j].sys # -1 and Playing[j].parent = i and Playing[j].playmode.lh_Vibrato = 1)
+
+                        // crossfade
+                        if (new_value = 1)
+                            change_vol(Playing[i].sys, VOLUME_MIN, 0)
+                            change_vol(Playing[j].sys, VOLUME_DEFAULT, 0)                            
+                            Playing[i].active := 0
+                            Playing[j].active := 1
+                        else 
+                            change_vol(Playing[i].sys, VOLUME_DEFAULT, 0)
+                            change_vol(Playing[j].sys, VOLUME_MIN, 0)
+                            Playing[i].active := 1
+                            Playing[j].active := 0
+                        end if
+
+                    end if
+                end for
+            end if
+        end for        
+
+end function
+
+function Playing_isOverlapping(string, note) -> result
+    result := -1
+    declare i
+    for i := 0 to Globals.maxVoices-1
+        if (Playing[i].sys # -1 and Playing[i].gn.string = string and Playing[i].gn.note # note and Playing[i].ghost = 0 and Playing[i].playMode.ghostNoise = 0)
+            result := i
+        end if
+    end for
+end function
+
+function Playing_isOverlappingEvents(note) -> result
+    result := 0
+    declare i
+    for i := 0 to Globals.maxVoices-1
+        if (Playing[i].sys # -1 and Playing[i].ghost = 0 and Playing[i].gn.note # note)
+            result := 1
+        end if
+    end for
+end function
+
+macro Playing_getActiveProperty(#p#, i, #var#, #index_var#)
+    #var# := Playing[i].#p#
+
+    for #index_var# := 0 to Globals.maxVoices-1
+        if (Playing[#index_var#].active = 1 and Playing[#index_var#].parent = i)
+            #var# := Playing[#index_var#].#p#
+        end if
+    end for
+end macro
+
+macro Playing_setPropertyTree(#p#, i, v, #index_var#)
+    Playing[i].#p# := v
+
+    for #index_var# := 0 to Globals.maxVoices-1
+        if (Playing[#index_var#].parent = i)
+            Playing[#index_var#].#p# := v
+        end if
+    end for
+end macro
+
+function Playing_getActiveIndex(i) -> result
+    declare j
+    result := -1
+    if (Playing[i].active = 1)
+        result := i
+    else 
+        for j := 0 to Globals.maxVoices-1
+            if (Playing[j].sys # -1 and j # i and Playing[j].active = 1 and (Playing[j].parent = i and Playing[i].parent = -1 or (Playing[j].parent = -1 or Playing[j].parent = Playing[i].parent) and Playing[i].parent # -1))
+                result := j
+            end if
+        end for
+    end if
+end function
+
+function Playing_getParentIndex(i) -> result
+    declare j
+    result := i
+    if (Playing[i].parent # -1)
+        result := Playing[i].parent
+    end if
+end function
+
+function Playing_stopAllNotes
+    declare i
+    for i := 0 to Globals.maxVoices-1
+        if (Playing[i].parent = -1)
+            Playing_stopNote(i)
+        end if
+    end for    
+end function
+
+function Playing_stopNotesOnString(string)
+    declare i
+    for i := 0 to Globals.maxVoices-1
+        if (Playing[i].sys # -1 and Playing[i].gn.string = string and Playing[i].parent = -1)
+            // debug("stop: " & Playing[i].sys)
+            Playing_stopNote(i)
+        end if
+    end for
+end function
+
+function Playing_stringIsPlaying(string) -> result
+    declare i
+    result := 0
+    for i := 0 to Globals.maxVoices-1
+        if (Playing[i].sys # -1 and Playing[i].gn.string = string and Playing[i].parent = -1 and Playing[i].ghost = 0)
+            result := 1
+            break(i, Globals.maxVoices)
+        end if
+    end for
+end function
+
+function Playing_stopNote(i)
+
+    Playing_stopChildren(i)
+
+    note_off(Playing[i].sys)
+    Playing_resetItemWithChilds(i)
+    UI_stopNote(i)
+
+end function
+
+function Playing_stopChildren(i)
+    declare j
+
+    // stop all children
+    for j := 0 to Globals.maxVoices-1
+        if (Playing[j].parent = i)
+            note_off(Playing[j].sys)
+        end if
+    end for    
+end function
+
+
+function Playing_maxVoicesReached() -> result
+    declare i := 0
+    while (i < Globals.maxVoices and Playing[i].sys # -1)
+        inc(i)
+    end while
+    
+    result := 0
+    if (i = Globals.maxVoices)
+        result := 1
+    end if    
+end function
+
+function Playing_changeTune(i, val, rel, tuneType)
+    declare value := val
+    if (rel = 0)
+        if (tuneType = TuneTypes.bend)
+            value := value + Globals.vibratoTune
+        else if (tuneType = TuneTypes.vibrato)
+            value := value + Globals.pitchBend
+        else 
+            value := value + Globals.pitchBend + Globals.vibratoTune
+        end if
+    end if
+
+    if (Globals.opString = 0 or Globals.opString = Playing[i].gn.string)
+        // debug2("tunning string (" & Globals.opString & ") " & Playing[i].gn.string)
+        change_tune(Playing[i].sys, value, rel)
+    end if
+end function
+
+macro copyNote(#dst#, #src#)
+    #dst#.note := #src#.note
+    #dst#.string := #src#.string
+    #dst#.fret := #src#.fret    
+end macro
+
+function chooseLastNote(note)
+    declare i
+    declare min := 100
+    declare s := -1
+    declare isPlaying := 0
+    for i := 0 to Const.stringCount-1
+        isPlaying := Playing_isPlaying(Strings[i].lastNote.string, Strings[i].lastNote.fret)
+        if (min > abs(Strings[i].lastNote.note - note) and isPlaying = 1)
+            min := abs(Strings[i].lastNote.note - note)
+            s := i
+        end if
+    end for
+    if (s >= 0)
+        mGuitarNote_copy(lastNote, Strings[s].lastNote)
+    end if
+end function
+
+function Playing_isPlaying(string, fret) -> result
+    result := 0
+    declare i
+    for i := 0 to Globals.maxVoices-1
+        if (Playing[i].sys # -1 and Playing[i].gn.string = string and Playing[i].gn.fret = fret and Playing[i].ghost = 0)
+            result := 1
+            break(i, Globals.maxVoices)
+        end if
+    end for
+end function
+
+function Playing_changeLHNoiseVolume(value)
+    declare vol            
+    declare i
+    for i := 0 to Globals.maxVoices-1
+        if (Playing[i].sys # -1 and Playing[i].playMode.afterNoteNoise = 1)
+            vol := getLHNoiseVolume(value)
+            change_vol(Playing[i].sys, vol, 0)
+        end if
+    end for
+end function
+
+function Playing_changeGhostNoiseVolume(value)
+    declare vol            
+    declare i
+    for i := 0 to Globals.maxVoices-1
+        if (Playing[i].sys # -1 and Playing[i].playMode.ghostNoise = 1)
+            vol := getGhostNoiseVolume(value)
+            change_vol(Playing[i].sys, vol, 0)
+        end if
+    end for
+end function
+
+function Playing_ghostNoise()
+    if (UI.ghostNoise > 0)
+
+        declare ic
+        declare time := Funcs.Time_getCurrentTime() - Globals.lastNoteEndTime
+        declare lastNoteLength := Funcs.Time_getCurrentTime() - lastNote.startTime
+        
+        if ((time >= 0 and time < 20 and Globals.lastNoteEndTime >= 0 and lastNoteLength <= 200) and (lastNote.string > nextNote.string))
+
+            // stop prev noise note on this string
+            declare j
+            for j := 0 to Globals.maxVoices-1
+                if (Playing[j].sys # -1 and Playing[j].playMode.ghostNoise = 1 and Playing[j].gn.string = lastNote.string)
+                    Playing_stopNote(j)
+                    // debug2("remove " & j)
+                end if
+            end for
+
+            declare note
+            note := Board_string2note(lastNote.string, 0)
+            ic := Playing_push(-1, note, lastNote.string, 0, 1, 100)
+            Playing[ic].playMode.ghostNoise := 1
+            Playing[ic].playMode.duration := 0
+            Playing_playNote(ic)
+            declare vol            
+            vol := getGhostNoiseVolume(UI.ghostNoise)
+            // debug2("Ghost Noise Vol " & vol)
+            change_vol(Playing[ic].sys, vol, 0)
+        end if
+    end if
+end function
+
+
+function Playing_chooseActive(i) -> result
+    declare j
+
+    result := i
+
+    for j := 0 to Globals.maxVoices-1
+        if (Playing[j].parent = i)
+            if (Playing[j].playMode.lh_Vibrato = 1 and playModeGlobal.vibratoNatural = 1 and playModeGlobal.vibratoDepth > 0)
+                result := j
+                break(j, Globals.maxVoices)
+            end if
+        end if
+    end for
+
+end function
+
+function Playing_isPlayingSomething -> result
+    declare i
+
+    result := 0
+
+    for i := 0 to Globals.maxVoices-1
+        if (Playing[i].sys # -1 and Playing[i].ghost = 0)
+            result := 1
+            break(i, Globals.maxVoices)
+        end if
+    end for
+
+end function
+
+function Playing_transformZoneLength(i) -> result
+    result := Playing[i].zone.length / 1000
+
+    declare val := Playing[i].valueForSampleSpeed
+
+    if (Playing[i].playMode.slideIn > 0)
+        if (result = 0)
+            result := 275
+        end if
+        val := Funcs.ask(val, playModeGlobal.slide, -1)
+        result := getSlideInLength(val, result)
+     end if
+
+end function

@@ -1,0 +1,137 @@
+function Const_on_init
+	family Const
+	    declare const pitchTableColumnCount := 128
+	    declare const pitchTableCount := 1
+	    declare const stringCount := 6
+        declare const fretCount := 25
+        declare const lowestNote := 40
+        define triggerPTCount := 7
+        declare const t_max := 5
+        declare const maxSlideInterval := 5
+        declare const slideUp2offset := 80 * 1000
+        declare const slideDown2duration := 200 * 1000
+        declare const simTakePeriod := 20
+	    declare const pitchBendPossibleInterval := 1000
+	end family
+
+    define FILE_EXT := ".wav"
+    define MAX_SIMULTANEOUS_NOTES := 6
+
+    const ArtsCodes
+        o_pd
+        o_pu
+        m_pd
+        m_pu
+        v1
+        si
+        so
+        ton
+        tof
+        su
+        sd
+        su2
+        sd2
+    end const
+
+    const TuneTypes
+        bend
+        vibrato
+        none
+    end const
+    
+    family Globals
+        declare takeCounts[ArtsCodes.SIZE]
+        declare const maxVoices := 20
+        declare const maxGroups := 5
+        declare const maxEvents := 10
+        declare lastGroupIndex := -1
+        declare lastTakeIndex := -1
+
+        declare pitchTableChanged := 0
+        declare pitchTableIndex := -1
+
+	    declare opString := 0 // which of the strings are influenced by various operations, such as pitch bend. 0 - all strings.
+	    declare opStringAuto := 1 // auto choosing opString
+
+        declare pitchBend := 0
+        declare vibratoTune := 0
+        declare pitchBendRaw := 0
+        declare tappingStarted := 0
+        declare slideStarted := 0
+        declare posDefault := 0
+        declare pitchBendNatural // says for itself
+
+        declare lastNoteEndTime := -1
+    end family
+
+    declare i
+    for i := 0 to ArtsCodes.SIZE-1
+        Globals.takeCounts[i] := 3
+    end for
+    Globals.takeCounts[ArtsCodes.v1] := 2
+    Globals.takeCounts[ArtsCodes.su] := 5
+    Globals.takeCounts[ArtsCodes.sd] := 5
+
+
+end function
+
+macro break(#i#, #v#)
+	#i# := #v#
+end macro
+
+// SLIDE SPEED AND LENGTH FUNCTIONS //
+
+function getEngineSlideSpeed(x) -> result
+    result := epSpeed(V2E, Funcs.linearEq(x, 1, 30, 127, 300, 100) / 10) 
+end function
+function getEngineSlide2Speed(x) -> result
+    result := epSpeed(V2E, Funcs.linearEq(x, 1, 30, 127, 150, 100) / 10) 
+end function
+
+function getSlideLength(speed, length) -> result
+    result := Funcs.linearEq(speed, 64, length, 127, length / 2, 100) / 100
+end function
+
+
+function getDurationForSlideDown(speed, duration) -> result
+    result := Funcs.linearEq(speed, 64, duration, 127, duration / 2, 1) / 1
+end function
+
+function getEngineSlideInSpeed(x) -> result
+    result := epSpeed(V2E, Funcs.linearEq(x, 1, 30, 127, 150, 100) / 10) 
+end function
+
+function getEngineSlideOutSpeed(x) -> result
+    result := epSpeed(V2E, Funcs.linearEq(x, 1, 30, 127, 150, 100) / 10) 
+end function
+
+function getSlideInLength(speed, length) -> result
+    result := Funcs.linearEq(speed, 64, length, 127, length / 2, 100) / 100
+end function
+
+function getGhostNoiseVolume(val) -> result
+    if (val = 0) 
+        result := VOLUME_MIN
+    else 
+        result := VOLUME_DEFAULT - Funcs.linearEq(val, 100, 0, 1, 10, 1000)
+    end if
+end function
+
+function getLHNoiseVolume(val) -> result
+    if (val = 0) 
+        result := VOLUME_MIN
+    else 
+        result := VOLUME_DEFAULT - Funcs.linearEq(val, 100, 0, 1, 30, 1000)
+    end if
+end function
+
+function getEnginePBSpeed(x) -> result
+    result := epSpeed(V2E, Funcs.linearEq(x, 1, 50, 127, 350, 100) / 10) 
+end function
+function getPBDelimiter(x) -> result
+    result := Funcs.linearEq(x, 22, 750, 100, 250, 100) / 100
+end function
+
+function getEngineLHVibratoSpeed(x) -> result
+    result := epSpeed(V2E, Funcs.linearEq(x, 0, 50, 127, 150, 100) / 10)
+end function

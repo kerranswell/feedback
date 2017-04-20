@@ -1,0 +1,7 @@
+
+on init
+	declare ar[2]
+
+	message(ar.SIZE)
+end on
+

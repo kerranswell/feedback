@@ -1,0 +1,538 @@
+macro Board_on_init
+
+    declare !noteChar[12] := ("c", "db", "d", "eb", "e", "f", "gb", "g", "ab", "a", "bb", "b")
+    declare notes2strings[128]
+    declare notes2frets[128]
+    Board_fillTable()    
+
+    struct _String
+        declare &_GuitarNote lastNote
+        declare &_GuitarNote nextNote
+        declare overlap
+    end struct
+
+    declare &_GuitarNote lastNote
+    declare &_GuitarNote nextNote    
+    declare &_String Strings[Const.stringCount]
+
+    Strings_resetAll()
+
+    Board_resetLastNote()
+
+    declare const zlength_group_count := 6
+    declare zlength_group_ids[zlength_group_count] := (17, 18, 19, 20, 21, 22)
+    declare %zone_lengths[zlength_group_count * Const.stringCount * Const.fretCount]
+    // Board_fillZoneLengths()
+end macro
+
+function Board_findFret(string, note) -> result
+    declare n1 := Const.lowestNote + 5 * (Const.stringCount - string)
+    if (string < 3)
+        dec(n1)
+    end if
+    declare n2 := n1 + 24
+
+    result := -1
+
+    if (note >= n1 and note <= n2)
+        result := note - n1
+    end if
+end function
+
+function Board_setNote(next_note)
+    declare forced := 0
+    if (playModeGlobal.forceFret # -1)  
+        forced := Board_setNoteForcedFret(next_note)
+    end if
+
+    if (forced = 0)
+        if (playModeGlobal.tapping = 1 and Globals.tappingStarted = 1)
+            Board_setNoteTapping(next_note)
+        else 
+            Board_setNoteStandard(next_note)
+        end if
+    end if
+
+    nextNote.startTime := Funcs.Time_getCurrentTime()
+
+    if (playModeGlobal.tapping = 1)
+        Globals.tappingStarted := 1
+    end if
+    if (playModeGlobal.slide > 0)
+        Globals.slideStarted := 1
+    end if
+
+    Strings_setNextNote()
+end function
+
+function Board_setNoteForcedFret(next_note) -> result
+    result := 0
+    declare i
+    declare n
+    for i := 1 to Const.stringCount
+        n := Board_string2note(i, playModeGlobal.forceFret)
+        if (next_note = n)
+            result := 1
+            nextNote.note := next_note
+            nextNote.string := i
+            nextNote.fret := playModeGlobal.forceFret
+            break(i, Const.stringCount+1)
+        end if
+    end for
+end function
+
+function Board_setNoteTapping(next_note)
+    declare string := lastNote.string
+    declare new_string := string
+    declare fret := lastNote.fret
+    declare new_fret := fret
+// debug2("ls " & lastNote.string & "; lf " & lastNote.fret)
+    declare dir := 1
+    declare cur_note := Board_string2note(string, fret) // last note number
+    if (cur_note > next_note) 
+        dir := -1
+    end if
+    playModeGlobal.dir := dir
+    declare diff := abs(cur_note - next_note)
+    declare fret_diff := Const.fretCount - fret
+
+    declare fm1 := 1
+    declare pos := playModeGlobal.pos
+    if (pos = 0)
+        fm1 := 0
+    end if
+
+    new_fret := Board_findFret(string, next_note)
+    if (new_fret < pos-fm1)
+        declare i
+        if (dir > 0)
+            for i := string-1 downto 1
+                new_fret := Board_findFret(i, next_note)
+                if (new_fret >= pos-fm1)
+                    new_string := i
+                    break(i, 1)
+                end if
+            end for        
+        else 
+            for i := string+1 to Const.stringCount
+                new_fret:= Board_findFret(i, next_note)
+                if (new_fret >= pos-fm1)
+                    new_string := i
+                    break(i, Const.stringCount)
+                end if
+            end for        
+        end if
+    end if
+
+    nextNote.note := next_note
+    nextNote.string := new_string
+    nextNote.fret := new_fret
+    // debug2("ns " & nextNote.string & "; nf " & nextNote.fret)
+end function
+
+function Board_setNoteStandard(next_note)
+    declare max_diff_from_lowest := 28; // 2 octaves + 3 notes + 1 note (-1 pos)
+    declare max_diff_from_highest := 28; // 2 octaves + 3 notes + 1 note (4th pos)
+
+    if (lastNote.string = 0)
+        Board_resetLastNote()
+    end if
+
+    declare string := lastNote.string
+    declare new_string := string
+    declare fret := lastNote.fret
+    declare new_fret := fret
+    declare pos := playModeGlobal.pos
+    declare force_pos := -1
+    declare max_diff_manual := -1
+
+    // debug("ls " & string & ", lf " & fret)
+
+    declare playModeLegato := Playing_isOverlappingEvents(next_note)
+    // TODO: Const.pitchBendPossibleInterval * pitchBend UI count of semitones
+    if (abs(Globals.pitchBendRaw) > Const.pitchBendPossibleInterval)
+        playModeLegato := 0
+    end if
+
+    if (playModeLegato = 0)
+        Globals.slideStarted := 0
+    end if
+
+    if (pos = 0)
+        dec(max_diff_from_lowest)
+    end if
+
+    declare dir := 1
+    declare cur_note := Board_string2note(string, fret) // last note number
+    if (cur_note > next_note) 
+        dir := -1
+    end if
+    playModeGlobal.dir := dir
+
+    declare cur_finger_pos := fret - pos // last note position in finger position (eg. hand position (POS) = 5, then 8th fret is 3rd finger position)
+    declare diff := abs(next_note - cur_note) // difference between last and next notes
+    declare max_diff
+    declare possible_diff := diff
+    declare next_finger_pos
+    declare finger // number of finger which presses the string
+    declare next_finger // number of finger for next note
+    declare first_pos_note
+    // fingers: 1 is index finger, 2 is middle finger, 3 is ring finger, 4 is little finger
+    declare pos_ := pos
+
+    if (dir > 0)
+        declare f4 := 0 // can we take 4 frets as interval?
+
+        next_finger_pos := possible_diff + cur_finger_pos // estimated finger position of next note
+        // if as = 1 (or f4 = 0), this means changing string if next note is on 4th finger position.
+        // So, if you don't want to jump on next string (eg. tapping or slides) - add cocondition here
+        // For now, it keeps same string only if legato mode is on
+        // Also, we can't jump on next string if next finger position going to be -1 (if we are on 0th pos, except 3rd string)
+        if ((playModeLegato = 1 and abs(next_finger_pos - cur_finger_pos) <= 4) or (pos = 0 and string # 3)) 
+            // f4 := 1
+        end if
+
+        pos_ := pos-1
+        if (pos_ < 0) 
+            pos_ := 0
+        end if
+        first_pos_note := Board_string2note(Const.stringCount, pos_)
+
+        max_diff := max_diff_from_lowest - abs(cur_note - first_pos_note) + f4 // if legato, then 4 frets possible, if not (0) then 3 possible in position
+        if (max_diff_manual < max_diff and max_diff_manual # -1) 
+            max_diff := max_diff_manual
+        end if
+
+        if (diff > max_diff)
+            possible_diff := max_diff
+        end if
+
+        next_finger_pos := possible_diff + cur_finger_pos // estimated finger position of next note
+// debug("cn " & cur_note & ", nn " & next_note & ", first " & first_pos_note & ", max_diff " & max_diff & ", diff " & diff & ", possible_diff " & possible_diff & ", next_finger_pos " & next_finger_pos)
+        declare as_ := 1 - f4
+
+        declare af_ := as_ // fret offset factor equals string offset factor, except if transition contains 3rd string
+
+        // when calculating string, offset (as) depends on 3rd string: does the interval between last and next notes contains third-to-second string transition?
+        // if yes, as offset is incremented
+        if ( string >= 3 and (next_finger_pos - 5 * (string-3) > 3 + f4))
+            inc(as_);
+        end if
+
+        new_string := string - (next_finger_pos + as_) / 5
+        new_fret := pos + (next_finger_pos + as_) mod 5 - af_
+    else
+        declare fm1 := 1 // can we descend by 1 fret left from position?
+
+        if (pos = 0 or cur_finger_pos = 4)
+            fm1 := 0
+        end if
+
+        pos_ := pos+4
+        if (pos_ > Const.fretCount) 
+            pos_ := Const.fretCount
+        end if
+        first_pos_note := Board_string2note(1, pos_)
+
+        max_diff := max_diff_from_highest - abs(cur_note - first_pos_note) + fm1
+        if (max_diff_manual < max_diff and max_diff_manual # -1) 
+            max_diff := max_diff_manual
+        end if
+
+        if (diff > max_diff)
+            possible_diff := max_diff
+        end if
+
+        next_finger_pos := cur_finger_pos - possible_diff // estimated finger position of next note
+
+        declare as_ := 1 - fm1
+
+        declare af_ := as_ - (cur_finger_pos-3) // fret offset factor equals string offset factor, except if transition contains 3rd string
+
+        // when calculating string, offset (as) depends on 3rd string: does the interval between last and next notes contains third-to-second string transition?
+        // if yes, as offset is incremented
+        if (string <  3 and (next_finger_pos + 5 * (2-string) < 0-fm1 ))
+            inc(as_)
+        end if
+
+        new_string := string + abs( next_finger_pos - 3 - as_) / 5
+        new_fret := pos + cur_finger_pos + (next_finger_pos - 3 - as_) mod 5 + af_
+    end if
+
+// debug("s " & new_string & ", f " & new_fret)
+// debug("last("& playModeGlobal.lastNoteStart &"), time("& Funcs.Time_getCurrentTime() &") ")
+    declare stringIsPlaying
+    stringIsPlaying := Playing_stringIsPlaying(string)
+    if (Globals.slideStarted = 1 and playModeGlobal.slide > 0 and abs(Funcs.Time_getCurrentTime() - lastNote.startTime) > Const.simTakePeriod and { ((dir * diff - cur_finger_pos > 4) or (dir * diff + cur_finger_pos < -1)) and } (pos + dir * diff <= Const.fretCount) and (pos + dir * diff >= 0) and stringIsPlaying = 1)
+// debug2("st " & Globals.slideStarted & ", slide " & playModeGlobal.slide & ", " )
+// debug2("s " & new_string & ", f " & new_fret)
+// debug2("pos " & pos & ", dir " & dir & ", diff " & diff)
+// debug2("string " & string & " is playing:  " & stringIsPlaying)
+// debug_Playing();
+        pos := pos + dir * diff
+        new_string := string
+        new_fret := pos + cur_finger_pos
+        if (cur_finger_pos < 0)
+            pos := pos + cur_finger_pos
+        end if
+
+    else if (diff > max_diff)
+        // move pos
+        pos := new_fret + dir * (diff - max_diff)
+        new_fret := pos
+    end if
+
+    if (force_pos >= 0 and force_pos <= Const.fretCount-3)
+        if (pos >= force_pos-1 and pos <= force_pos+3)
+            pos := force_pos
+        end if
+    end if
+
+    if (pos > Const.fretCount - 3) 
+        pos := Const.fretCount - 3
+    end if
+    if (pos < 0) 
+        pos := 0
+    end if
+
+    next_finger := new_fret - pos + 1
+    if (next_finger > 4) 
+        next_finger := 4
+    end if
+    if (next_finger <= 0 and pos > 0) 
+        next_finger := 1
+    end if
+    if (pos = 0 and (new_fret - pos) < 4) 
+        next_finger := next_finger - 1
+    end if
+
+{     if (playModeLegato = 1 and lastNote.string = new_string and lastNote.fret # new_fret)
+        playModeGlobal.pm.legato := 1
+    else 
+        playModeGlobal.pm.legato := 0
+    end if
+ }
+    nextNote.note := next_note
+    nextNote.string := new_string
+    nextNote.fret := new_fret
+// debug2("ns " & nextNote.string & "; nf " & nextNote.fret)
+    // playModeGlobal.pos := pos
+    extControl(ExtEventType.pos, pos)
+end function
+
+function Board_resetLastNote()
+    mGuitarNote_reset(lastNote)
+end function
+
+function getString(n) -> result
+    result := notes2strings[n]
+end function
+function getFret(n) -> result
+    result := notes2frets[n]
+end function
+
+function getVelocity(string, fret) -> result
+    result := (string-1) * 3 + 1 + fret / 12
+end function
+
+
+function Board_fillTable()
+    for i := 0 to 127
+        notes2strings[i] := 0
+        notes2frets[i] := -1
+    end for
+
+    notes2strings[_A(1)] := 6
+    notes2strings[_C(2)] := 6
+    notes2strings[_D(2)] := 5
+    notes2strings[_E(2)] := 5
+    notes2strings[_G(2)] := 4
+    notes2strings[_A(2)] := 4
+    notes2strings[_C(3)] := 3
+    notes2strings[_D(3)] := 3
+    notes2strings[_E(3)] := 2
+    notes2strings[_G(3)] := 2
+    notes2strings[_A(3)] := 1
+    notes2strings[_C(4)] := 1
+
+    notes2frets[_A(1)] := 5
+    notes2frets[_C(2)] := 8
+    notes2frets[_D(2)] := 5
+    notes2frets[_E(2)] := 7
+    notes2frets[_G(2)] := 5
+    notes2frets[_A(2)] := 7
+    notes2frets[_C(3)] := 5
+    notes2frets[_D(3)] := 7
+    notes2frets[_E(3)] := 5
+    notes2frets[_G(3)] := 8
+    notes2frets[_A(3)] := 5
+    notes2frets[_C(4)] := 8
+end function
+
+
+{ ***** Note Code, Ha-ha ****** }
+
+function _C(n) -> result
+    result := (n+2) * 12
+end function
+function _Db(n) -> result
+    result := (n+2) * 12 + 1
+end function
+function _D(n) -> result
+    result := (n+2) * 12 + 2
+end function
+function _Eb(n) -> result
+    result := (n+2) * 12 + 3
+end function
+function _E(n) -> result
+    result := (n+2) * 12 + 4
+end function
+function _F(n) -> result
+    result := (n+2) * 12 + 5
+end function
+function _Gb(n) -> result
+    result := (n+2) * 12 + 6
+end function
+function _G(n) -> result
+    result := (n+2) * 12 + 7
+end function
+function _Ab(n) -> result
+    result := (n+2) * 12 + 8
+end function
+function _A(n) -> result
+    result := (n+2) * 12 + 9
+end function
+function _Bb(n) -> result
+    result := (n+2) * 12 + 10
+end function
+function _B(n) -> result
+    result := (n+2) * 12 + 11
+end function
+
+function noteName(n) -> result
+    declare octave
+    declare note
+
+    octave := n / 12 - 2
+    note := n mod 12
+
+    result := !noteChar[note] & octave
+end function
+
+function Board_string2note(string, fret) -> result
+
+    declare fret_offset := 0
+    if (string <= 2)
+        fret_offset := 1
+    end if
+
+    result := Const.lowestNote + fret + (Const.stringCount - string) * 5 - fret_offset
+end function
+
+function Board_getZoneCode(string, fret, group_id) -> result
+{     declare @name
+    declare vmin
+    declare vmax
+    vmin := (string-1) * 3 + 1
+    vmax := string * 3
+    @name := "f" & fret & "s" & string & "_" & note & "_" & vmin & "-" & vmax & "_" & group & "t" & t
+ }
+
+    result := Const.fretCount * (string-1) + fret
+    result := result + group_id * (Const.stringCount * Const.fretCount)
+end function 
+
+function Board_fillZoneLengths
+    declare i
+    declare f
+    declare s
+    declare g
+    declare zcode
+    declare z_id
+    declare @name
+    declare @note
+    declare note_num
+    declare !zl_group_names[zlength_group_count]
+
+    for g := 0 to num_elements(zlength_group_ids)-1
+        if (zlength_group_ids[g] >= 0)
+            !zl_group_names[g] := group_name(zlength_group_ids[g])
+            debug(!zl_group_names[g])
+        end if
+    end for
+
+    for i := 0 to num_elements(%zone_lengths)-1
+        %zone_lengths[i] := -1
+    end for
+
+    for s := 1 to Const.stringCount
+        for f := 0 to Const.fretCount-1
+            note_num := Board_string2note(s, f)
+            @note := noteName(note_num)
+            // debug(@note)
+
+            for g := 0 to num_elements(zlength_group_ids)-1
+                if (zlength_group_ids[g] >= 0)
+
+                    zcode := Board_getZoneCode(s, f, zlength_group_ids[g])
+                    @name := "f" & f & "s" & s & "_" & @note & "_" & ((s-1) * 3 + 1) & "-" & (s * 3) & "_" & !zl_group_names[g]
+                    z_id := find_zone(@name)
+                    debug(@name & "["& zcode &"] "& z_id)
+                    
+                    if (z_id >= 0)
+                        %zone_lengths[zcode] := get_sample_length(z_id)
+                        debug2("zl["& zcode &"] = " & %zone_lengths[zcode])
+                    end if                
+                end if
+                // debug2(@name & ", z_id("& z_id &"), z_code("& zcode &"), length("&  %zone_lengths[zcode] &")")
+            end for
+        end for
+    end for
+    
+end function
+
+function Strings_resetAll()
+    declare i
+    for i := 0 to Const.stringCount-1
+        Strings_reset(i)
+    end for
+end function
+
+function Strings_reset(i)
+    Strings[i].overlap := 0
+    mGuitarNote_reset(Strings[i].lastNote)
+    mGuitarNote_reset(Strings[i].nextNote)
+end function
+
+function Strings_analyze()
+    declare overlap
+    if (nextNote.string > 0)
+        overlap := Playing_isOverlapping(nextNote.string, nextNote.note)
+        if (overlap # -1)
+            Strings[nextNote.string-1].overlap := 1
+        else 
+            Strings[nextNote.string-1].overlap := 0
+        end if        
+    end if
+{     declare i 
+    for i := 0 to Const.stringCount-1
+        if (Playing_isOverlapping(i+1, note))
+            Strings[i].overlap := 1
+        else 
+            Strings[i].overlap := 0
+        end if
+    end for
+ }
+end function
+
+function Strings_setLastNote()
+    if (lastNote.string > 0)
+        mGuitarNote_copy(Strings[lastNote.string-1].lastNote, lastNote)
+    end if
+end function
+
+function Strings_setNextNote()
+    if (nextNote.string > 0)
+        mGuitarNote_copy(Strings[nextNote.string-1].nextNote, nextNote)
+    end if
+end function
