@@ -33,9 +33,11 @@ function Event_resetItem(i)
 end function
 
 function Event_push(delay, type) -> result
-    declare i := 0
+    declare i := -1
 
-    Array_Push(Event, Globals.maxEvents, i, Event[i].type # -1)
+    while (i < Globals.maxEvents and Event[i].type # -1)
+        inc(i)
+    end while
 
     if (i < Globals.maxEvents)
         Event[i].createTime := Funcs.Time_getCurrentTime()

@@ -1,7 +1,6 @@
 { ******* Debugging ******** }
 
 function debug_PlayMode(i)
-    debug("rh_Muted(" & Playing[i].playMode.rh_Muted & "), " & "lh_Vibrato(" & Playing[i].playMode.lh_Vibrato & "), " & "pickDown(" & Playing[i].playMode.pickDown & "), " & "letRing(" & Playing[i].playMode.letRing & "), " )
     debug("---------")
 end function
 
@@ -9,21 +8,11 @@ function debug_Playing
     // debug_clear()
     for i := 0 to Globals.maxVoices-1
         if (Playing[i].sys # -1)
-            debug("([" & i & "] s" & Playing[i].gn.string &"f"& Playing[i].gn.fret &"), " & "sys(" & Playing[i].sys & ", zl("& Playing[i].zone.length &"), " & "active(" & Playing[i].active & "), " & "parent(" & Playing[i].parent & "), LR(" & Playing[i].playMode.letRing & "), V(" & Playing[i].playMode.lh_Vibrato & "), si("& Playing[i].playMode.slideIn &"), so("& Playing[i].playMode.slideOut &"), su("& Playing[i].playMode.slideUp &","&Playing[i].playMode.slideUp2&"), sd("& Playing[i].playMode.slideDown &","&Playing[i].playMode.slideDown2&"), off("&Playing[i].playmode.offset&"), pn(" & Playing[i].playmode.pickNoise & "), gnoise(" & Playing[i].playmode.ghostNoise & "), pb(" & Playing[i].playmode.pitchBendNatural & "), stn(" & Playing[i].playmode.afterNoteNoise & "), ghost(" & Playing[i].ghost & "), pm.duration(" & Playing[i].playmode.duration & ")")
             debug("")            
         end if
     end for
 
     debug("---------")  
-end function
-
-function debug_Strings2()
-    // debug2_clear()
-    for i := 0 to Const.stringCount-1
-        debug2("S" & i+1 & ": ov(" & Strings[i].overlap & "), lst(" & Strings[i].lastNote.fret & "), nxt(" & Strings[i].nextNote.fret & ") ")
-    end for
-
-    debug2("---------")  
 end function
 
 function debug_Groups
@@ -41,51 +30,6 @@ function debug_affectedGroups
     for i := 0 to num_elements(%GROUPS_AFFECTED)-1
         debug(group_name(%GROUPS_AFFECTED[i]))
     end for
-end function
-
-function debug_Strings()
-    declare @pickDown
-    declare @letRing
-    declare @rh_Muted
-    declare @lh_Vibrato
-
-    // debug2_clear()
-
-    for i := 0 to Globals.maxVoices-1
-        if (Playing[i].gn.string > 0 and Playing[i].active = 1)
-
-            if (Playing[i].playMode.pickDown = 0)
-                @pickDown := " up"
-            else
-                @pickDown := " dn"
-            end if
-
-            if (Playing[i].playMode.letRing = 1)
-                @letRing := " LetRing"
-            else
-                @letRing := ""
-            end if
-
-            if (Playing[i].playMode.rh_Muted = 1)
-                @rh_Muted := " P.M."
-            else
-                @rh_Muted := ""
-            end if
-
-            if (Playing[i].playMode.lh_Vibrato = 0)
-                @lh_Vibrato := ""
-            else
-                @lh_Vibrato := " Vib" & Playing[i].playMode.lh_Vibrato
-                @rh_Muted := ""
-                @letRing := ""
-                @pickDown := " dn"
-            end if
-
-            debug2("n" & Playing[i].gn.note & "; string " & Playing[i].gn.string & @pickDown & @letRing & @rh_Muted & @lh_Vibrato & " leg(" & Playing[i].playMode.legato & ") si(" & Playing[i].playMode.slideIn & ") so(" & Playing[i].playMode.slideOut & ") su(" & Playing[i].playMode.slideUp & ") ")
-        end if
-    end for
-    // debug2("ops: " & Globals.opString)  
-    debug2("---------")  
 end function
 
 function debug(s)
@@ -106,27 +50,4 @@ end function
 
 function debug2_clear
     set_text(UI.label2, "")
-end function
-
-{function debug_PitchTable
-    debug2("PT Time Length: " & pitchTables[Globals.pitchTableIndex].timeLength)
-    debug2("PT Pitch Range: " & pitchTables[Globals.pitchTableIndex].pitchRange)
-end function}
-
-function debug_altStroke
-    debug_clear()
-    if (playModeGlobal.pm.pickDown = 1)
-        debug("Pick Down")
-    else 
-        debug("Pick Up")
-    end if
-end function
-
-function debug_Hits
-    declare i
-    // debug2_clear()
-
-    for i := 0 to UI.hits.SIZE-1
-        debug2("hits[" & i & "] = ( master: "& UI.hits[i].master_sys &" )")
-    end for
 end function

@@ -1,9 +1,6 @@
 macro PlayMode_on_init
     struct _PlayMode
-        declare rh_Muted // right hand muted articulation
-        declare pickDown // sound production: 0 = pick up, 1 = pick down, ...  etc.
         declare lh_Vibrato // vibrato by left hand articulation
-        declare letRing // lets string sound after release
         declare slideIn // slideIn sample triggers simultaniously with main note
         declare slideOut // slideOut sample triggers after release
         declare slideUp // slide from one note to another
@@ -13,39 +10,17 @@ macro PlayMode_on_init
         declare legato
         declare offset
         declare duration
-        declare pickNoise // pick noise sample
-        declare ghostNoise // slight touch of a string by left hand when moving from the string up to next
-        declare pitchBendNatural // says for itself
         declare afterNoteNoise // noise after note is played when finger removes from the board
 
         declare artCode
     end struct
 
-    const Intervals
-        Eighth
-        Sixteenth
-        Demisemiquaver
-    end const
-
-    family Durations
-        declare bar
-        declare sixteenth
-        declare eighth
-        declare barStart
-        declare seq := 0
-    end family
-
     struct _PlayModeGlobal
         declare &_PlayMode pm
-        declare altStroke := 0
-        declare altStrokeInterval := Intervals.Eighth
-        declare pos := Globals.posDefault // left hand position
-        declare forceFret := -1 // force fret
         declare vibratoSpeed := VIBRATO_SPEED_DEFAULT
         declare vibratoDepth := 0
 
         declare lastNoteStart := -1
-        declare tapping := 0
         declare vibratoNatural := 0
         declare slide := 0
         declare dir := 1        
@@ -58,59 +33,13 @@ macro PlayMode_on_init
     PlayMode_resetPlayMode(playModeGlobal.pm)
     playModeGlobal.pm.slideIn := 0
 
-    // declare zones[ArtsCodes.SIZE, 128, 3, Const.stringCount, Const.fretCount]
-    // PlayMode_loadZoneIds()
-
 end macro
 
-function Durations_switch(run)
-    if (run = 1)
-        Durations.bar := $DURATION_BAR
-        Durations.sixteenth := $DURATION_SIXTEENTH
-        Durations.eighth := $DURATION_EIGHTH
-        Durations.barStart := $DISTANCE_BAR_START
-        Durations.seq := 1
-    else 
-        Durations.bar := $DURATION_BAR
-        Durations.seq := 0
-    end if
-end function
-
-{
-function PlayMode_loadZoneIds
-    declare j
-    declare k
-    declare @zone_name
-    for j := 0 to 127
-        for k:= 0 to Globals.takeCounts[ArtsCodes.so]-1
-            @zone_name := PlayMode_getZoneName()
-        end for
-        zones[ArtsCodes.so, j, k] := 
-    end for
-end function
-
-function PlayMode_getZoneName(string, fret, _note, takeIndex) -> result
-    declare v1
-    declare v2
-    declare @note
-    note := noteName(_note)
-    v1 := (string-1) * Globals.maxGroups + 1
-    v2 := string * Globals.maxGroups
-    result := "f" & fret & "s" & string & "_" & @note & "_" & v1 & "-" & v2 & "_si_" & "t" & takeIndex & FILE_EXT    
-end function
-}
-
 macro PlayMode_resetPlayMode(#p#)
-    #p#.rh_Muted := 0
-    #p#.pickDown := 1
     #p#.lh_Vibrato := 0
-    #p#.letRing := 0
     #p#.legato := 0
     #p#.offset := 0
     #p#.duration := -1
-    #p#.pickNoise := 0
-    #p#.ghostNoise := 0
-    #p#.pitchBendNatural := 0
     #p#.afterNoteNoise := 0
 
     #p#.slideIn := 0
@@ -124,16 +53,10 @@ macro PlayMode_resetPlayMode(#p#)
 end macro
 
 macro PlayMode_copy(#p#, #p2#)
-    #p#.rh_Muted := #p2#.rh_Muted
-    #p#.pickDown := #p2#.pickDown
     #p#.lh_Vibrato := #p2#.lh_Vibrato
-    #p#.letRing := #p2#.letRing
     #p#.legato := #p2#.legato
     #p#.offset := #p2#.offset
     #p#.duration := #p2#.duration
-    #p#.pickNoise := #p2#.pickNoise
-    #p#.ghostNoise := #p2#.ghostNoise
-    #p#.pitchBendNatural := #p2#.pitchBendNatural
     #p#.afterNoteNoise := #p2#.afterNoteNoise
 
     #p#.slideIn := #p2#.slideIn
@@ -151,96 +74,7 @@ end macro
 function setPlayMode(velocity, string, note)
 
     PlayMode_resetPlayMode(playMode)
-
-    playMode.letRing := playModeGlobal.pm.letRing
-    playMode.pickDown := playModeGlobal.pm.pickDown
-
-    playMode.artCode := ArtsCodes.o_pd
-
-    if (in_range(velocity, velocityArtZones.rh_Muted_Down[0], velocityArtZones.rh_Muted_Down[1]))
-        playMode.rh_Muted := 1
-        playMode.letRing := 0
-        playMode.artCode := ArtsCodes.m_pd
-        if (UI.altStroke = 0)
-            playMode.pickDown := 1
-        end if
-    else if (in_range(velocity, velocityArtZones.rh_Muted_Up[0], velocityArtZones.rh_Muted_Up[1]))
-        playMode.rh_Muted := 1
-        playMode.letRing := 0
-        playMode.artCode := ArtsCodes.m_pd
-        if (UI.altStroke = 0)
-            playMode.pickDown := 0
-            playMode.artCode := ArtsCodes.m_pu
-        end if
-    else if (in_range(velocity, velocityArtZones.rh_Opened_Down[0], velocityArtZones.rh_Opened_Down[1]))
-        playMode.rh_Muted := 0
-        if (UI.altStroke = 0)
-            playMode.pickDown := 1
-        end if
-    else if (in_range(velocity, velocityArtZones.rh_Opened_Up[0], velocityArtZones.rh_Opened_Up[1]))
-        playMode.rh_Muted := 0
-        if (UI.altStroke = 0)
-            playMode.pickDown := 0
-            playMode.artCode := ArtsCodes.o_pu
-        end if
-    else if (in_range(velocity, velocityArtZones.lh_Vibrato[0], velocityArtZones.lh_Vibrato[1]))
-        playMode.pickDown := 1
-        playMode.lh_Vibrato := 1
-        playMode.artCode := ArtsCodes.v1
-{
-    else if (in_range(velocity, velocityArtZones.letRing_Up[0], velocityArtZones.letRing_Up[1]))
-        playMode.letRing := 1
-        playMode.rh_Muted := 0
-        if (UI.pickVelocityControl = 1)
-            playMode.pickDown := 0
-        end if
-    else if (in_range(velocity, velocityArtZones.letRing_Down[0], velocityArtZones.letRing_Down[1]))
-        playMode.letRing := 1
-        playMode.rh_Muted := 0
-        if (UI.pickVelocityControl = 1)
-            playMode.pickDown := 1
-        end if
-}
-    end if
-// debug("nxt str " & nextNote.string & ", ov " & Strings[nextNote.string-1].overlap)
-
-{     if (playMode.artCode = ArtsCodes.m_pd and UI.softMute = 0)
-        playMode.artCode := ArtsCodes.m2_pd
-    end if
-
-    if (playMode.artCode = ArtsCodes.m_pu and UI.softMute = 0)
-        playMode.artCode := ArtsCodes.m2_pu
-    end if
- }
-
-    declare slide_bool
-    mPlayMode_isSlide(playMode, slide_bool)
-    if (Globals.pitchBendNatural # 0 and slide_bool = 0)
-        playMode.rh_Muted := 0 
-        playMode.pickNoise := 0
-        playMode.lh_Vibrato := 0 // maybe we will cross it later
-        playMode.pitchBendNatural := Globals.pitchBendNatural
-    end if
-
-    playMode.legato := Strings[nextNote.string-1].overlap
     playMode.offset := 0
-    if (playMode.rh_Muted = 0 and playModeGlobal.slide = 0)
-        // playMode.legato := Playing_isOverlapping(string, note)
-
-        if (UI.tapSamples = 0)
-
-            if (playMode.legato = 1 or playModeGlobal.tapping = 1)
-                declare r
-                declare upperLimit := 770
-                if (playMode.pitchBendNatural # 0)
-                    upperLimit := 100
-                end if
-                r := random(0, upperLimit)
-                playMode.offset := (20 + r) * 1000 // (30-800)ms
-            end if
-        end if
-    end if
-    // uiFeedbackPlayMode()
 
 end function
 
@@ -251,177 +85,3 @@ macro mPlayMode_isSlide(#p#, #result#)
         #result# := 1
     end if
 end macro
-
-{function PlayMode_getVelocityByPlayMode(i) -> result
-
-    result := velocityArtZones.rh_Opened_Down[0]
-
-    if (playMode.rh_Muted = 1)
-        if (playMode.pickDown = 1)
-            result := velocityArtZones.rh_Muted_Down[0]
-        else 
-            result := velocityArtZones.rh_Muted_Up[0]
-        end if
-    end if
-
-    if (playMode.rh_Muted = 0)
-        if (playMode.pickDown = 1)
-            result := velocityArtZones.rh_Opened_Down[0]
-        else 
-            result := velocityArtZones.rh_Opened_Up[0]
-        end if
-    end if
-
-    if (playMode.lh_Vibrato = 1)
-        result := velocityArtZones.lh_Vibrato[0]
-    end if
-
-end function
-}
-
-macro PlayMode_change(#pm#, #type#, val)
-    select (#type#)
-
-        // vibrato
-        case ExtEventType.rh_Muted
-            
-            if (val = 1)
-                #pm#.lh_Vibrato := 0
-            end if
-
-            #pm#.rh_Muted := val
-
-        // let ring
-        case ExtEventType.letRing
-
-            if (val = 1)
-                #pm#.rh_Muted := 0
-            end if
-
-            #pm#.letRing := val
-
-    end select
-end macro
-
-// sets stroke direction according to position beat position
-function PlayMode_setStroke
-    declare interval
-    declare interval_pos
-    declare distance
-
-    if ($NI_TRANSPORT_RUNNING = 1)
-        interval := PlayMode_getIntervalRunning()
-        distance := $DISTANCE_BAR_START
-    end if
-
-    interval_pos := RoundDiv(distance, interval)
-
-    if (interval_pos mod 2 = 0)
-        playModeGlobal.pm.pickDown := 1
-    else 
-        playModeGlobal.pm.pickDown := 0
-    end if
-end function
-
-// switches stroke direction according to distance between previous note start and the new note
-function PlayMode_switchStroke()
-    declare now := Funcs.Time_getCurrentTime() // ms
-    declare distance := now - playModeGlobal.lastNoteStart
-    declare distance_index
-    declare interval
-    declare defined_index // user defined index
-    declare duration_bar
-    defined_index := PlayMode_getIntervalIndex()
-
-    if ($NI_TRANSPORT_RUNNING = 1)
-        duration_bar := $DURATION_BAR / 1000
-
-        Funcs.mQuantizeLength(distance, distance_index, duration_bar)
-
-        // eg. if user defined stroke interval is 1/16 (defined_index = 4) and distance is 1/32 (distance_index = 5) then direction needs to be switched anyway. 
-        // but if distance is 1/4 - direction is not switched
-        if (distance_index >= defined_index) 
-            declare p
-            p := Power(2, distance_index, 1, 0) // eg. 2^4, i.e. 1/16
-            interval := duration_bar / p
-            if ((distance / interval) mod 2 = 1) 
-                playModeGlobal.pm.pickDown := Funcs.reverseValue(playModeGlobal.pm.pickDown)
-            end if
-        end if
-    end if
-end function
-
-function PlayMode_nextNoteInit
-
-    if (playModeGlobal.altStroke = 1 and $NI_TRANSPORT_RUNNING = 1)
-
-        PlayMode_setStroke()
-        // if (playModeGlobal.lastNoteStart = -1 or abs(Funcs.Time_getCurrentTime() - playModeGlobal.lastNoteStart) >= $DURATION_BAR)
-        // else
-            // PlayMode_switchStroke()
-        // end if
-
-    end if
-end function
-
-function PlayMode_getIntervalIndex -> result
-    result := 0
-    select playModeGlobal.altStrokeInterval
-
-        case Intervals.Sixteenth
-            result := 4
-
-        case Intervals.Demisemiquaver
-            result := 5
-            
-        case Intervals.Eighth
-            result := 3
-
-    end select
-end function
-
-function PlayMode_getIntervalRunning -> result
-    select playModeGlobal.altStrokeInterval
-
-        case Intervals.Sixteenth
-            result := $DURATION_SIXTEENTH
-
-        case Intervals.Demisemiquaver
-            result := $DURATION_SIXTEENTH / 2
-            
-        case Intervals.Eighth
-            result := $DURATION_EIGHTH
-
-    end select
-end function
-
-function PlayMode_setOpString(j)
-    if (Globals.opStringAuto = 1)
-        declare set_new := 1
-        declare i
-
-        for i := 0 to Globals.maxVoices-1
-            if (Playing[i].sys # -1 and Playing[i].active = 1 and Playing[i].ghost = 0)
-                // if pitch bend already in process, leave opString at old value.
-                // if pitch bend is zero - no bends at the moment - then opString becomes new note string
-                // ver1: but if 2 notes started simultaniously then choose string which is lower (4 is lower than 3)
-                // ver2: if 2 notes started simultaniously - we bend all strings - opString becomes 0
-                // if (Globals.pitchBend # 0 or (Playing[i].gn.string = Globals.opString and Playing[i].gn.string > Playing[j].gn.string and Playing[i].startTime = Playing[j].startTime))
-                if (Globals.pitchBend # 0)
-                    set_new := 0
-                    break(i, Globals.maxVoices)
-                else if (abs(Playing[i].startTime - Playing[j].startTime) <= 5)
-                    // notes_playing := 1
-                    if (abs(Playing[i].gn.note - Playing[j].gn.note) <= 6 and Playing[i].gn.string > Playing[j].gn.string) 
-                        set_new := 0
-                    end if
-                end if
-            end if
-        end for
-
-        if (set_new = 1)
-            Globals.opString := Playing[j].gn.string
-        end if
-
-    end if
-end function
