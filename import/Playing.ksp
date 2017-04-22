@@ -18,7 +18,6 @@ macro Playing_on_init
     struct _Playing
 
         declare sys // EVENT_ID
-        declare &_GuitarNote gn
         declare &_PlayMode playMode
 
         //  if # -1 than this note is a child note, connected to first taken note 
@@ -30,6 +29,7 @@ macro Playing_on_init
         { Time operations }
         declare startTime
 
+        declare eventNote // note
         declare eventVelocity
 
         // ghost note (eg. slide out sound)
@@ -81,14 +81,8 @@ macro Zone_set(i)
     // debug2("z"&Playing[i].zone.id&": "&Playing[i].zone.length)
 end macro
 
-function Playing_startPitchTableCycle(i, string)
-    if ((Playing[i].gn.string = string or string = Const.stringCount+1) and Playing[i].timeOp.pitchTable = -1)
-        Playing[i].timeOp.pitchTable := Funcs.Time_getCurrentTime()
-    end if
-end function
-
 function Playing_startVibratoCycle(i)
-    if (Playing[i].sys # -1 and Playing[i].playMode.rh_Muted = 0)
+    if (Playing[i].sys # -1)
         Playing[i].timeOp.vibrato := 0
     end if
 end function
@@ -110,7 +104,7 @@ function Playing_timeOperationsStart(i)
         fade_in(Playing[i].sys, timeOperationTotals.fadeIn * 1000)
     end if
 
-    if (playModeGlobal.vibratoDepth > 0 and Playing[i].playMode.lh_Vibrato = 0)
+    if (playModeGlobal.vibratoDepth > 0)
         Playing_startVibratoCycle(i)
     end if
 
@@ -118,25 +112,6 @@ function Playing_timeOperationsStart(i)
 
     end if
 
-end function
-
-function Playing_getIndex(_note, string) -> result
-    declare i := 0
-    declare break := 0
-
-    while (i < Globals.maxVoices and break = 0)
-        if (Playing[i].gn.note = _note and (Playing[i].gn.string = string or string = 0) and Playing[i].parent = -1)
-            break := 1 {found note, index will be current i. Thus before i++ we have to do i--}
-            dec(i)
-        end if
-
-        inc(i)
-    end while
-
-    result := -1
-    if (i < Globals.maxVoices)
-        result := i
-    end if
 end function
 
 function Playing_getIndexBySys(sys) -> result
@@ -153,14 +128,14 @@ end function
 function Playing_push(sys, _note, string, fret, active, eventVelocity) -> result
     declare i := 0
 
-    Array_Push(Playing, Globals.maxVoices, i, Playing[i].sys # -1)
+    while (i < Globals.maxVoices and Playing[i].sys # -1)
+        inc(i)
+    end while
 
     if (i < Globals.maxVoices)
         Playing[i].sys := sys
-        Playing[i].gn.note := _note
-        Playing[i].gn.string := string
-        Playing[i].gn.fret := fret
 
+        Playing[i].eventNote := _note
         Playing[i].eventVelocity := eventVelocity
 
         Playing[i].active := active
@@ -172,20 +147,6 @@ function Playing_push(sys, _note, string, fret, active, eventVelocity) -> result
 
 end function
 
-function Playing_getDuration(i) -> result
-    result := -1
-    if (Playing[i].playmode.slideDown2 > 0) 
-        result := Const.slideDown2duration
-    end if
-end function
-
-function Playing_getOffset(i) -> result
-    result := 0
-    if (Playing[i].playmode.slideUp2 > 0) 
-        result := Const.slideUp2offset
-    end if
-end function
-
 macro createChild(#parent#, active)
     j := Playing_createChild(#parent#, active)
     if (j # -1)
@@ -193,7 +154,6 @@ macro createChild(#parent#, active)
         Playing[j].playMode.offset := Playing_getOffset(j)
     end if        
 end macro
-
 
 function Playing_startSlideOut(i, value)
     declare j
@@ -204,17 +164,6 @@ end function
 function Playing_startChildren(i)
     declare j
 
-{     if (Playing[i].playMode.rh_Muted = 0 and PlayModeGlobal.vibratoNatural = 1 and Playing[i].playMode.pitchBendNatural = 0) 
-        if (PlayModeGlobal.vibratoDepth > 0)
-            createChild(i, 1)
-        else 
-            createChild(i, 0)
-        end if
-
-        Playing[j].playMode.lh_Vibrato := 1
-        Playing_playNote(j)
-    end if 
- }
     declare group_index
     declare ev
 
