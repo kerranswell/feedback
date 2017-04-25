@@ -437,17 +437,6 @@ function Playing_changeLHNoiseVolume(value)
     end for
 end function
 
-function Playing_changeGhostNoiseVolume(value)
-    declare vol            
-    declare i
-    for i := 0 to Globals.maxVoices-1
-        if (Playing[i].sys # -1 and Playing[i].playMode.ghostNoise = 1)
-            vol := getGhostNoiseVolume(value)
-            change_vol(Playing[i].sys, vol, 0)
-        end if
-    end for
-end function
-
 function Playing_isPlayingSomething -> result
     declare i
 
