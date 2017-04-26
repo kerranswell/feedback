@@ -1,5 +1,6 @@
 macro PlayMode_on_init
     struct _PlayMode
+        declare still // still note
         declare lh_Vibrato // vibrato by left hand articulation
         declare slideIn // slideIn sample triggers simultaniously with main note
         declare slideOut // slideOut sample triggers after release
@@ -36,6 +37,7 @@ macro PlayMode_on_init
 end macro
 
 macro PlayMode_resetPlayMode(#p#)
+    #p#.still := 1
     #p#.lh_Vibrato := 0
     #p#.legato := 0
     #p#.offset := 0
@@ -53,6 +55,7 @@ macro PlayMode_resetPlayMode(#p#)
 end macro
 
 macro PlayMode_copy(#p#, #p2#)
+    #p#.still := #p2#.still
     #p#.lh_Vibrato := #p2#.lh_Vibrato
     #p#.legato := #p2#.legato
     #p#.offset := #p2#.offset
@@ -71,10 +74,9 @@ macro PlayMode_copy(#p#, #p2#)
     #p#.artCode := #p2#.artCode
 end macro
 
-function setPlayMode(velocity, string, note)
+function setPlayMode(note, velocity)
 
     PlayMode_resetPlayMode(playMode)
-    playMode.offset := 0
 
 end function
 

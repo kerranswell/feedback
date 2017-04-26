@@ -47,6 +47,9 @@ macro Playing_on_init
         declare groupIndex
     end struct
 
+    declare &_Note lastNote
+    declare &_Note nextNote    
+
     declare &_Playing Playing[Globals.maxVoices]
     Playing_resetAll()
 
@@ -159,6 +162,8 @@ end macro
 
 function Playing_playNote(i)
     Groups_prepare(i)
+    debug_Groups()
+
     Playing[i].sys := play_note(Playing[i].note.note, Playing[i].note.velocity, Playing[i].playMode.offset, Playing[i].playMode.duration)
     if (Playing[i].active # 2) 
         change_vol(Playing[i].sys, VOLUME_MIN, 0)

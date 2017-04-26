@@ -180,7 +180,7 @@ function timeOperations()
 
                     if (Playing[j].sys # -1 and Playing[j].playmode.afterNoteNoise = 1)
                         declare vol            
-                        vol := getGhostNoiseVolume(UI.ghostNoise)
+                        vol := getGhostNoiseVolume(100)
                         change_vol(Playing[j].sys, vol, 0)
                     end if
 
